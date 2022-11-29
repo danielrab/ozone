@@ -1,6 +1,6 @@
 use std::fs;
 
-use ozone::tokenizer::parse;
+use ozone::parse;
 
 fn main() {
     let contents = fs::read_to_string("test.ozone").unwrap();

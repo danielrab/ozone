@@ -1,42 +1,82 @@
 pub mod tokenizer;
-use std::ops::Range;
+use tokenizer::BracketType;
+use tokenizer::parse as source_to_tokens;
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy)]
-pub enum TokenKind {
-    String,
-    Character,
-    Identifier,
-    Operator,
-    Brace,
-}
+use std::fmt::Display;
+
+use bigdecimal::BigDecimal;
+use num_bigint::BigInt;
+use colored::Colorize;
+
 #[derive(Debug)]
-pub struct Token<'a> {
-    pub kind: TokenKind,
-    pub span: Range<usize>,
-    pub content: &'a str,
+enum Token<'a> {
+    String(&'a str),
+    Operator(&'a str),
+    Number(BigDecimal),
+    Identifier(&'a str),
+    Bracketed(BracketType, Vec<tokenizer::Token<'a>>),
 }
-impl<'a> TryFrom<tokenizer::Token<'a>> for Token<'a> {
-    type Error = ();
-    fn try_from(token: tokenizer::Token<'a>) -> Result<Self, Self::Error> {
-        use tokenizer::TokenKind as TK;
-        let kind = match token.kind {
-            TK::Comment => return Err(()),
-            TK::Whitespace => return Err(()),
-            TK::Brace => TokenKind::Brace,
-            TK::Character => TokenKind::Character,
-            TK::Identifier => TokenKind::Identifier,
-            TK::Operator => TokenKind::Operator,
-            TK::String => TokenKind::String
+#[derive(Debug, Default)]
+struct Statement<'a>(Vec<Token<'a>>);
+
+impl Display for Token<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use Token::*;
+        let repr = match self {
+            String(s) => format!("{s:?}").truecolor(255, 128, 0),
+            Operator(o) => o.truecolor(128, 128, 128),
+            Bracketed(bracket_type, _) => match bracket_type {
+                BracketType::Curly => "{...}",
+                BracketType::Round => "(...)",
+                BracketType::Square => "[...]",
+            }.to_owned().white(),
+            Integer(i) => i.to_string().yellow(),
+            Decimal(i) => i.to_string().yellow(),
+            Identifier(id) => id.blue(),
         };
-        Ok(Self { kind, span: token.span, content: token.content })
+        write!(f, "{repr}")
     }
 }
 
-pub fn parse(source: &str) -> Result<Vec<Token>, tokenizer::Error> {
-    let all_tokens = tokenizer::parse(source)?;
-    let meaningful_tokens = all_tokens
-        .into_iter()
-        .flat_map(Token::try_from)
-        .collect();
-    Ok(meaningful_tokens)
+#[derive(Debug)]
+pub enum Error {
+    MismatchedClosingParentheses(String),
+    LexingError,
+}
+
+fn tokens_to_statements(tokens: Vec<tokenizer::Token>) -> Result<Vec<Statement>, Error> {
+    let mut statements = vec![Statement::default()];
+    for token in tokens {
+        let token = match token {
+            tokenizer::Token::String(content) => Token::String(content),
+            tokenizer::Token::Operator(content) => Token::Operator(content),
+            tokenizer::Token::Bracketed((bracket_type, content)) => Token::Bracketed(bracket_type, content),
+            tokenizer::Token::Number(content) => Token::Number(content),
+            tokenizer::Token::Identifier(content) => Token::Identifier(content),
+            tokenizer::Token::Comment(_) => continue,
+            tokenizer::Token::Semicolon => {statements.push(Statement::default()); continue},
+            tokenizer::Token::ClosingBracket(content) => return Err(Error::MismatchedClosingParentheses(content.to_owned())),
+            tokenizer::Token::Error => return Err(Error::LexingError),
+        };
+        let len = statements.len();
+        statements[len-1].0.push(token);
+    }
+    Ok(statements)
+}
+
+fn statements_to_expression(statements: Vec<Statement>) -> Result<(), Error> {
+    for statement in statements {
+        for token in statement.0 {
+            print!("{token} ");
+        }
+        println!();
+    }
+    Ok(())
+}
+
+pub fn parse(source: String) -> Result<(), Error> {
+    let tokens = source_to_tokens(&source);
+    let statements = tokens_to_statements(tokens)?;
+    let _ast = statements_to_expression(statements)?;
+    Ok(())
 }

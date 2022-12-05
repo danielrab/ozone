@@ -1,131 +1,108 @@
-use std::{ops::Range, str::from_utf8};
+use logos::Logos;
+use bigdecimal::BigDecimal;
+use num_bigint::BigInt;
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy)]
-pub enum TokenKind {
-    String,
-    Character,
-    Identifier,
-    Operator,
-    Whitespace,
-    Comment,
-    Brace,
+#[derive(Debug, PartialEq)]
+pub enum BracketType {
+    Round,
+    Square,
+    Curly,
 }
-#[derive(Debug)]
-pub struct Token<'a> {
-    pub kind: TokenKind,
-    pub span: Range<usize>,
-    pub content: &'a str,
+
+#[derive(Logos, Debug, PartialEq)]
+pub enum Token<'a> {
+    #[regex("#*\"", string_lexer)]
+    String(&'a str),
+
+    #[regex("//.*")]
+    #[token("(*", comment_lexer)]
+    Comment(&'a str),
+
+    #[token(";")]
+    Semicolon,
+
+    #[regex(r"[!@#$%^&*+=\\|'/?,.<>:-]+")]
+    Operator(&'a str),
+
+    #[token("(", |lex| {(BracketType::Round, parse_inner(lex, ")"))})]
+    #[token("[", |lex| {(BracketType::Square, parse_inner(lex, "]"))})]
+    #[token("{", |lex| {(BracketType::Curly, parse_inner(lex, "}"))})]
+    Bracketed((BracketType, Vec<Token<'a>>)),
+
+    // this should never actually end up in the parsed token stream
+    #[regex(r"[)}\]]")]
+    ClosingBracket(&'a str),
+
+    #[regex("[0-9]+", |lex| lex.slice().parse())]
+    #[regex(r"[0-9]+\.[0-9]+", |lex| lex.slice().parse())]
+    Number(BigDecimal),
+
+    #[regex("[a-zA-Z_][a-zA-Z0-9_]*")]
+    Identifier(&'a str),
+
+    #[error]
+    #[regex(r"[ \t\n\f]+", logos::skip)]
+    Error,
 }
-impl From<u8> for TokenKind {
-    fn from(c: u8) -> Self {
-        match c {
-            b'"' | b'#' => Self::String,
-            b'\'' => Self::Character,
-            b'/' => Self::Comment,
-            b'[' | b']' | b'{' | b'}' | b'(' | b')' => Self::Brace,
-            0..=31 | b' ' | 127 => Self::Whitespace,
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | 128.. => Self::Identifier,
-            _ => Self::Operator,
+
+fn parse_inner<'a>(lex: &mut logos::Lexer<'a, Token<'a>>, closing_bracket: &str) -> Vec<Token<'a>> {
+    lex.take_while(|t| t != &Token::ClosingBracket(closing_bracket))
+        .collect()
+}
+
+pub fn parse(source: &str) -> Vec<Token> {
+    parse_inner(&mut Token::lexer(source), ")")
+}
+
+fn string_lexer<'a>(lex: &mut logos::Lexer<'a, Token<'a>>) -> Result<&'a str, ()> {
+    let tag = &lex.slice()[..lex.slice().len() - 1];
+    let rem = lex.remainder();
+    let mut escaping = false;
+
+    for (i, &current) in rem.as_bytes().iter().enumerate() {
+        if current == b'"' && !escaping && rem[i + 1..].starts_with(tag) {
+            lex.bump(i + 1 + tag.len());
+            return Ok(&rem[..i]);
+        }
+        escaping = current == b'\\' && !escaping;
+    }
+    Err(())
+}
+
+fn comment_lexer<'a>(lex: &mut logos::Lexer<'a, Token<'a>>) -> Result<&'a str, ()> {
+    let rem = lex.remainder();
+    let mut nesting = 0;
+
+    for (i, current) in rem.as_bytes().windows(2).enumerate() {
+        match current {
+            b"(*" => nesting += 1,
+            b"*)" if nesting > 0 => nesting -= 1,
+            b"*)" => {
+                lex.bump(i + 2);
+                return Ok(&rem[..i]);
+            }
+            _ => {}
         }
     }
+
+    Err(())
 }
 
-#[derive(Debug)]
-pub enum Error {
-    UnfinishedToken(TokenKind),
-}
-
-fn extract_count<'a>(source: &mut &'a [u8], count: usize) -> Option<&'a [u8]> {
-    let res = &source.get(..count)?;
-    *source = &source[count..];
-    Some(res)
-}
-
-fn extract_to_end<'a>(source: &mut &'a [u8]) -> &'a [u8] {
-    let res = &source[..];
-    *source = Default::default();
-    res
-}
-
-fn extract_until<'a>(source: &mut &'a [u8], ending: &[u8], from: usize) -> Option<&'a [u8]> {
-    source
-        .windows(ending.len())
-        .skip(from)
-        .position(|s| s == ending)
-        .map(|p| p + from)
-        .and_then(|p| extract_count(source, p + ending.len()))
-}
-
-fn extract_type<'a>(source: &mut &'a [u8]) -> &'a [u8] {
-    source
-        .iter()
-        .position(|&c| TokenKind::from(c) != TokenKind::from(source[0]))
-        .and_then(|p| extract_count(source, p))
-        .unwrap_or_else(|| extract_to_end(source))
-}
-
-fn extract_string<'a>(source: &mut &'a [u8], tag: Option<&[u8]>) -> Option<&'a [u8]> {
-    let mut position = 1;
-    let tag = tag.map(|t| [t, b"#"].concat()).unwrap_or_default();
-
-    loop {
-        let remaining_source = &source.get(position..)?;
-        let point_of_interest = remaining_source.iter().position(|c| b"\"\\|".contains(c))?;
-
-        let char = remaining_source[point_of_interest];
-        let remaining_source = &remaining_source[point_of_interest + 1..];
-        position += point_of_interest + 1;
-
-        let skip = match char {
-            b'\\' => 1,
-            b'|' => remaining_source.iter().position(|&c| c == b'|')? + 1,
-            b'"' if remaining_source[..tag.len()] == tag => return extract_count(source, position+tag.len()),
-            _ => 0,
-        };
-        position += skip;
+#[cfg(test)]
+mod test {
+    use super::Token;
+    use logos::Logos;
+    #[test]
+    fn comments() {
+        check_lexer("(**)", &[Token::Comment("")]);
+        check_lexer("(***)", &[Token::Comment("*")]);
+        check_lexer("(*(**)*)", &[Token::Comment("(**)")]);
+        check_lexer("(**)(**)", &[Token::Comment(""), Token::Comment("")]);
+        check_lexer("(*привет*)", &[Token::Comment("привет")]);
     }
-}
-
-fn extract_token<'a>(source: &mut &'a [u8]) -> Result<(TokenKind, &'a [u8]), Error> {
-    let kind = TokenKind::from(source[0]);
-    let content = match source {
-        [b'#', ..] => {
-            let tag_end = source
-                .iter()
-                .position(|&c| c == b'"')
-                .ok_or(Error::UnfinishedToken(kind))?;
-            extract_string(source, Some(&source[1..tag_end])).ok_or(Error::UnfinishedToken(kind))?
-        }
-        [b'"', ..] => extract_string(source, None).ok_or(Error::UnfinishedToken(kind))?,
-        [b'/', b'*', ..] => extract_until(source, b"*/", 2).ok_or(Error::UnfinishedToken(kind))?,
-        [b'/', b'/', ..] => {
-            extract_until(source, b"\n", 0).unwrap_or_else(|| extract_to_end(source))
-        }
-        [b'\'', b'|', ..] => extract_until(source, b"|", 2).ok_or(Error::UnfinishedToken(kind))?,
-        [b'\'', b'\\', ..] => extract_count(source, 3).ok_or(Error::UnfinishedToken(kind))?,
-        [b'\'', ..] => extract_count(source, 2).ok_or(Error::UnfinishedToken(kind))?,
-        _ if kind == TokenKind::Brace => extract_count(source, 1).unwrap(),
-        _ => extract_type(source),
-    };
-    Ok((kind, content))
-}
-
-pub fn parse(source: &str) -> Result<Vec<Token>, Error> {
-    let mut source = source.as_bytes();
-    let mut tokens = Vec::new();
-    let mut position = 0;
-
-    while !source.is_empty() {
-        let (kind, content) = extract_token(&mut source)?;
-        let content = from_utf8(content).expect("token isn't utf-8");
-        let span = position..position + content.len();
-
-        position += content.len();
-        tokens.push(Token {
-            kind,
-            content,
-            span,
-        });
+    fn check_lexer(input: &str, output: &[Token]) {
+        let lex = Token::lexer(input);
+        let tokens: Vec<Token> = lex.collect();
+        assert_eq!(tokens, output, "{input}")
     }
-    Ok(tokens)
 }

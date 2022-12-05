@@ -43,10 +43,10 @@
   -  unique reference
 
 - operators must guarantee non-panicking
-- assigning version of the operators is automatically created as long as the operator returns the same type as its left operand and can't be created otherwise
-- unless changing the order of operations doesn't change the outcome, parentheses are mandatory
+- operators bind more strongly than functions
 - default integer type is unbound
 - division of integers returns fractions
+- .function is an operator that applies said function
 
 - #### custom operators
   - each operator has a single corresponding named function or function-like macro.

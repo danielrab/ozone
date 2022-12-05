@@ -30,8 +30,7 @@ impl Display for Token<'_> {
                 BracketType::Round => "(...)",
                 BracketType::Square => "[...]",
             }.to_owned().white(),
-            Integer(i) => i.to_string().yellow(),
-            Decimal(i) => i.to_string().yellow(),
+            Number(i) => i.to_string().yellow(),
             Identifier(id) => id.blue(),
         };
         write!(f, "{repr}")

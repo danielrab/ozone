@@ -1,0 +1,13 @@
+Expression ::= Atom | Scope | Tuple | OperatorApplication | FunctionApplication 
+Pattern ::= Atom | Tuple | FunctionApplication | Wildcard 
+Wildcard ::= '$' Identifier
+FunctionApplication ::= Expression Expression
+Lambda ::= Pattern '->' Expression
+Tuple ::= '(' (Expression ',' (Expression (',' Expression )* ','?)?)?  ')'
+Scope ::= '(' Expression (';' Expression )* ')'
+Atom ::= String | Identifier
+OperatorApplication ::= Expression Operator
+Operator ::= BaseOperator | Identifier
+Identifier ::= [a-zA-Z0-9_]+
+BaseOperator ::= [~!@#$%^&*+=\\|/?><':-]+
+String ::= External

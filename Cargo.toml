@@ -7,7 +7,6 @@ edition = "2021"
 
 [dependencies]
 bigdecimal = "0.3.0"
-chumsky = "0.8.0"
 colored = "2.0.0"
 logos = "0.12.1"
 num-bigint = "0.4.3"

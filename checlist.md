@@ -1,0 +1,12 @@
+- [ ] initial design
+  - [ ] variable declarations
+  - [ ] assignment
+  - [ ] types
+  - [ ] functions
+  - [ ] operators
+  - [ ] macros
+- [ ] interpreter
+  - [ ] lexer
+  - [ ] parser
+  - [ ] type checker
+  - [ ] evaluator
